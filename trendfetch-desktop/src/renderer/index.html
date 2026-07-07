@@ -1,0 +1,286 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self';">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>TrendFetch</title>
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar">
+      <div class="brand-block">
+        <div class="brand-mark">TF</div>
+        <div>
+          <div class="brand-title">TrendFetch</div>
+          <div class="brand-subtitle">Google store lead collector</div>
+        </div>
+      </div>
+
+      <section class="sidebar-section">
+        <div class="section-title">Run</div>
+        <div class="button-row stack">
+          <button class="btn primary" id="btn-start">Start Run</button>
+          <button class="btn accent" id="btn-continue" disabled>Continue Google Auth</button>
+          <button class="btn ghost" id="btn-stop" disabled>Stop Run</button>
+        </div>
+        <div class="status-card">
+          <div class="status-pill" id="run-status-pill">Idle</div>
+          <div class="status-text" id="run-status-text">Ready to configure a new collection run.</div>
+        </div>
+      </section>
+
+      <section class="sidebar-section">
+        <div class="section-title">Model Routing</div>
+        <label class="field">
+          <span>Base URL</span>
+          <input id="base_url" type="text" placeholder="https://api.example.com/v1">
+        </label>
+        <label class="field">
+          <span>Token</span>
+          <input id="api_key" type="password" placeholder="sk-...">
+        </label>
+        <label class="field">
+          <span>Model</span>
+          <input id="model_name" type="text" placeholder="gpt-4o-mini">
+        </label>
+        <label class="field">
+          <span>LLM timeout (ms)</span>
+          <input id="llm_timeout_ms" type="number" min="1000" step="500">
+        </label>
+        <label class="switch-field">
+          <div>
+            <span>Enable LLM review</span>
+            <small>Run a second-pass relevance check and contact enrichment after site extraction.</small>
+          </div>
+          <input id="enable_llm_review" type="checkbox">
+        </label>
+      </section>
+
+      <section class="sidebar-section">
+        <div class="section-title">Output</div>
+        <label class="field">
+          <span>Output Folder</span>
+          <div class="inline-picker">
+            <input id="output_dir" type="text" placeholder="/path/to/output">
+            <button class="icon-btn" id="btn-pick-folder" title="Pick folder">...</button>
+          </div>
+        </label>
+        <div class="button-row">
+          <button class="btn ghost" id="btn-open-output">Open Folder</button>
+          <button class="btn ghost" id="btn-refresh-output">Refresh Results</button>
+        </div>
+      </section>
+    </aside>
+
+    <main class="main">
+      <header class="hero">
+        <div>
+          <div class="eyebrow">Desktop Workflow</div>
+          <h1>Configurable multilingual Google lead collection</h1>
+          <p>All operator inputs now live in the UI: search requests, timeouts, result limits, browser mode, language coverage, and model routing metadata.</p>
+        </div>
+        <div class="hero-metrics">
+          <div class="metric">
+            <span class="metric-label">Result cap</span>
+            <span class="metric-value" id="metric-result-cap">0</span>
+          </div>
+          <div class="metric">
+            <span class="metric-label">Timeout</span>
+            <span class="metric-value" id="metric-timeout">0s</span>
+          </div>
+          <div class="metric">
+            <span class="metric-label">Languages</span>
+            <span class="metric-value" id="metric-languages">0</span>
+          </div>
+        </div>
+      </header>
+
+      <div class="content-grid">
+        <section class="panel config-panel">
+          <div class="panel-header">
+            <div>
+              <h2>Collection Configuration</h2>
+              <p>Structured controls for query scope, limits, browser mode, execution boundaries, and reserved model routing fields.</p>
+            </div>
+            <button class="btn ghost" id="btn-save-config">Save Config</button>
+          </div>
+
+          <div class="form-grid">
+            <label class="field field-span-2">
+              <span>Search Requests</span>
+              <textarea id="queries" rows="5" placeholder="One query per line"></textarea>
+            </label>
+
+            <label class="field field-span-2">
+              <span>Search Languages</span>
+              <input id="search_languages" type="text" placeholder="en,ja,zh,es,pt,fr,de">
+            </label>
+
+            <label class="switch-field">
+              <div>
+                <span>Auto translate queries</span>
+                <small>Expand every request into the configured language set.</small>
+              </div>
+              <input id="auto_translate_queries" type="checkbox">
+            </label>
+
+            <label class="switch-field">
+              <div>
+                <span>Headless browser</span>
+                <small>Disable when you need human-like browsing or visual verification.</small>
+              </div>
+              <input id="headless" type="checkbox">
+            </label>
+
+            <label class="switch-field">
+              <div>
+                <span>Manual Google auth</span>
+                <small>Pause for user verification before the search loop starts.</small>
+              </div>
+              <input id="manual_google_auth" type="checkbox">
+            </label>
+
+            <label class="switch-field">
+              <div>
+                <span>Stop on Google block</span>
+                <small>End the run after a `google.com/sorry` block instead of wasting queries.</small>
+              </div>
+              <input id="stop_on_google_block" type="checkbox">
+            </label>
+
+            <label class="field">
+              <span>Max pages per query</span>
+              <input id="max_pages_per_query" type="number" min="1">
+            </label>
+            <label class="field">
+              <span>Top results limit per query</span>
+              <input id="top_results_limit_per_query" type="number" min="1">
+            </label>
+            <label class="field">
+              <span>Max pages per site</span>
+              <input id="max_results_per_site" type="number" min="1">
+            </label>
+            <label class="field">
+              <span>Max site failures</span>
+              <input id="max_site_failures_before_skip" type="number" min="1">
+            </label>
+
+            <label class="field">
+              <span>Open timeout (ms)</span>
+              <input id="page_open_timeout_ms" type="number" min="1000" step="500">
+            </label>
+            <label class="field">
+              <span>Page load timeout (ms)</span>
+              <input id="page_load_timeout_ms" type="number" min="1000" step="500">
+            </label>
+            <label class="field">
+              <span>Delay min (ms)</span>
+              <input id="delay_min_ms" type="number" min="0" step="100">
+            </label>
+            <label class="field">
+              <span>Delay max (ms)</span>
+              <input id="delay_max_ms" type="number" min="0" step="100">
+            </label>
+
+            <label class="field">
+              <span>Country hint</span>
+              <input id="country_hint" type="text" placeholder="US">
+            </label>
+            <label class="field">
+              <span>Language hint</span>
+              <input id="language_hint" type="text" placeholder="en">
+            </label>
+            <label class="field">
+              <span>Viewport width</span>
+              <input id="viewport_width" type="number" min="800">
+            </label>
+            <label class="field">
+              <span>Viewport height</span>
+              <input id="viewport_height" type="number" min="600">
+            </label>
+
+            <label class="field field-span-2">
+              <span>User agent</span>
+              <input id="user_agent" type="text" placeholder="Mozilla/5.0 ...">
+            </label>
+          </div>
+        </section>
+
+        <section class="panel side-stack">
+          <div class="panel-header compact">
+            <div>
+              <h2>Run Console</h2>
+              <p>Live logs from the Playwright runner and manual-auth handoff.</p>
+            </div>
+          </div>
+          <div class="console-toolbar">
+            <button class="btn ghost" id="btn-clear-log">Clear Log</button>
+          </div>
+          <pre class="console" id="console"></pre>
+        </section>
+
+        <section class="panel results-panel">
+          <div class="panel-header">
+            <div>
+              <h2>Outputs</h2>
+              <p>Summary, CSV preview, and diagnostics from the current output folder.</p>
+            </div>
+          </div>
+
+          <div class="result-summary" id="summary-cards"></div>
+
+          <div class="results-toolbar">
+            <label class="field compact-field grow">
+              <span>Filter rows</span>
+              <input id="results-filter" type="text" placeholder="Store, email, country, notes...">
+            </label>
+            <label class="field compact-field">
+              <span>Sort by</span>
+              <select id="results-sort-key">
+                <option value="confidence_score">confidence_score</option>
+                <option value="store_name">store_name</option>
+                <option value="country">country</option>
+                <option value="city">city</option>
+                <option value="query_language">query_language</option>
+              </select>
+            </label>
+            <label class="field compact-field">
+              <span>Direction</span>
+              <select id="results-sort-direction">
+                <option value="desc">desc</option>
+                <option value="asc">asc</option>
+              </select>
+            </label>
+            <button class="btn ghost" id="btn-export-filtered">Export Visible CSV</button>
+          </div>
+
+          <div class="tab-bar">
+            <button class="tab active" data-tab="csv">CSV Preview</button>
+            <button class="tab" data-tab="failures">Failures</button>
+            <button class="tab" data-tab="filtered">Filtered</button>
+            <button class="tab" data-tab="queries">Expansions</button>
+          </div>
+
+          <div class="tab-view active" id="tab-csv">
+            <div class="table-wrap">
+              <table id="results-table"></table>
+            </div>
+          </div>
+          <div class="tab-view" id="tab-failures">
+            <pre class="json-view" id="failures-view"></pre>
+          </div>
+          <div class="tab-view" id="tab-filtered">
+            <pre class="json-view" id="filtered-view"></pre>
+          </div>
+          <div class="tab-view" id="tab-queries">
+            <pre class="json-view" id="queries-view"></pre>
+          </div>
+        </section>
+      </div>
+    </main>
+  </div>
+  <script src="./renderer.js"></script>
+</body>
+</html>

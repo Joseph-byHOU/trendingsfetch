@@ -1,0 +1,39 @@
+{
+  "queries": [
+    "成人用品"
+  ],
+  "auto_translate_queries": true,
+  "search_languages": [
+    "en",
+    "ja",
+    "zh",
+    "es",
+    "de"
+  ],
+  "max_pages_per_query": 1,
+  "top_results_limit_per_query": 10,
+  "max_results_per_site": 4,
+  "page_open_timeout_ms": 10000,
+  "page_load_timeout_ms": 10000,
+  "max_site_failures_before_skip": 2,
+  "output_dir": "./sample-output",
+  "country_hint": "US",
+  "language_hint": "en",
+  "headless": false,
+  "manual_google_auth": true,
+  "stop_on_google_block": true,
+  "enable_llm_review": false,
+  "base_url": "",
+  "api_key": "",
+  "model_name": "",
+  "llm_timeout_ms": 20000,
+  "user_agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
+  "viewport": {
+    "width": 1440,
+    "height": 960
+  },
+  "delay_range_ms": {
+    "min": 800,
+    "max": 1800
+  }
+}

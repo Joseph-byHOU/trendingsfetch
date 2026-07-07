@@ -1,0 +1,14 @@
+{
+  "name": "trendfetch-skill-runner",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Playwright-based lead collection runner for the TrendFetch skill",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node trendfetch-runner.js --config ./config.example.json",
+    "check": "node --check trendfetch-runner.js && node --check query-expansion.js && node --check validate-config.js && node --check llm-postprocess.js"
+  },
+  "dependencies": {
+    "playwright": "^1.54.0"
+  }
+}

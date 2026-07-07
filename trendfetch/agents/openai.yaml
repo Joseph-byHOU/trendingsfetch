@@ -1,0 +1,4 @@
+interface:
+  display_name: "TrendFetch"
+  short_description: "Search Google and collect store leads"
+  default_prompt: "Use $trendfetch to search Google across multiple languages, collect adult-product store contacts, and export a CSV."

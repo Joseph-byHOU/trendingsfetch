@@ -1,0 +1,24 @@
+.DS_Store
+
+# Node dependencies
+node_modules/
+
+# Local caches and browser binaries
+.npm-cache/
+.playwright-browsers/
+
+# Runtime outputs and debug artifacts
+desktop-output/
+trendfetch/scripts/sample-output/
+trendfetch/scripts/output/
+trendfetch/scripts/google-debug/
+
+# Desktop app runtime state and secrets
+trendfetch-desktop/data/app-config.json
+trendfetch-desktop/data/runtime-config.json
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
