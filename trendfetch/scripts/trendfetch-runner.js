@@ -90,6 +90,7 @@ const CONTACT_PATHS = [
 const EMAIL_REGEX = /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi;
 const PHONE_REGEX = /(?:\+?\d[\d\s().-]{6,}\d)/g;
 const PERSON_REGEX = /\b(?:contact|sales manager|account manager|founder|ceo|mr\.|ms\.)[:\s-]*([A-Z][A-Za-z]+(?:\s+[A-Z][A-Za-z]+){0,2})/i;
+const PHONE_LABEL_REGEX = /(?:phone|tel|telephone|call|mobile|whatsapp|contact number|customer service|热线|电话|手機|手机|電話|お問い合わせ|連絡先)[:\s]*([+()\d][\d\s().-]{6,}\d)/gi;
 const RESULT_HEADERS = [
   'store_name',
   'website_url',
@@ -645,6 +646,117 @@ function uniqueMatches(regex, text) {
   return Array.from(matches);
 }
 
+function parseMailtoAddress(value) {
+  const raw = String(value || '').replace(/^mailto:/i, '').split('?')[0].trim();
+  return raw;
+}
+
+function normalizeEmail(value) {
+  return parseMailtoAddress(value).replace(/\s*\[at\]\s*/gi, '@').replace(/\s*\(at\)\s*/gi, '@').trim().toLowerCase();
+}
+
+function isLikelyEmail(value) {
+  const email = normalizeEmail(value);
+  if (!email) {
+    return false;
+  }
+  if (!/^[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}$/i.test(email)) {
+    return false;
+  }
+  if (/(example\.com|email\.com|domain\.com)$/i.test(email)) {
+    return false;
+  }
+  if (/\.(png|jpg|jpeg|gif|webp|svg)$/i.test(email)) {
+    return false;
+  }
+  return true;
+}
+
+function normalizePhone(value) {
+  let raw = String(value || '').replace(/^tel:/i, '').split('?')[0].trim();
+  raw = raw.replace(/[^\d+().\-\s]/g, ' ');
+  raw = normalizeWhitespace(raw);
+  if (raw.startsWith('00')) {
+    raw = `+${raw.slice(2)}`;
+  }
+  return raw;
+}
+
+function isLikelyPhone(value) {
+  const raw = normalizePhone(value);
+  if (!raw) {
+    return false;
+  }
+  if (/^\d{4}[-/.]\d{1,2}[-/.]\d{1,2}$/.test(raw)) {
+    return false;
+  }
+  if (/^\d{4}\s*-\s*\d{4}$/.test(raw)) {
+    return false;
+  }
+  if ((raw.match(/\./g) || []).length >= 2) {
+    return false;
+  }
+  if ((raw.match(/[a-z]/gi) || []).length > 0) {
+    return false;
+  }
+  const digits = raw.replace(/\D/g, '');
+  if (digits.length < 7 || digits.length > 15) {
+    return false;
+  }
+  if (/^(19|20)\d{2}(0[1-9]|1[0-2])\d{2}$/.test(digits)) {
+    return false;
+  }
+  return true;
+}
+
+function extractEmails(signals) {
+  const emails = new Set();
+  for (const value of signals.mailtoLinks || []) {
+    const email = normalizeEmail(value);
+    if (isLikelyEmail(email)) {
+      emails.add(email);
+    }
+  }
+
+  const sources = [signals.contactText, signals.footerText, signals.bodyText];
+  for (const source of sources) {
+    for (const value of uniqueMatches(EMAIL_REGEX, source || '')) {
+      const email = normalizeEmail(value);
+      if (isLikelyEmail(email)) {
+        emails.add(email);
+      }
+    }
+  }
+  return Array.from(emails);
+}
+
+function extractPhones(signals) {
+  const phones = new Set();
+  for (const value of signals.telLinks || []) {
+    const phone = normalizePhone(value);
+    if (isLikelyPhone(phone)) {
+      phones.add(phone);
+    }
+  }
+
+  const scopedText = [signals.contactText, signals.footerText].filter(Boolean).join('\n');
+  for (const match of scopedText.matchAll(PHONE_LABEL_REGEX)) {
+    const phone = normalizePhone(match[1]);
+    if (isLikelyPhone(phone)) {
+      phones.add(phone);
+    }
+  }
+
+  for (const value of uniqueMatches(PHONE_REGEX, scopedText)) {
+    const phone = normalizePhone(value);
+    if (isLikelyPhone(phone)) {
+      phones.add(phone);
+    }
+  }
+
+  return Array.from(phones);
+}
+
 function findContactPerson(text) {
   const match = String(text || '').match(PERSON_REGEX);
   return match ? normalizeWhitespace(match[1]) : '';
@@ -654,18 +766,33 @@ async function extractSiteSignals(page) {
   return page.evaluate(() => {
     const title = document.title || '';
     const bodyText = document.body ? document.body.innerText : '';
+    const contactSelector = [
+      'a[href^="mailto:"]',
+      'a[href^="tel:"]',
+      'footer',
+      '[class*="contact"]',
+      '[id*="contact"]',
+      '[class*="footer"]',
+      '[id*="footer"]',
+      '[class*="support"]',
+      '[id*="support"]'
+    ].join(',');
     const allLinks = Array.from(document.querySelectorAll('a')).map((anchor) => ({
       href: anchor.href,
       text: anchor.textContent || ''
     }));
     const mailtoLinks = Array.from(document.querySelectorAll('a[href^="mailto:"]')).map((anchor) => anchor.getAttribute('href') || '');
     const telLinks = Array.from(document.querySelectorAll('a[href^="tel:"]')).map((anchor) => anchor.getAttribute('href') || '');
+    const footerText = Array.from(document.querySelectorAll('footer')).map((node) => node.textContent || '').join('\n');
+    const contactText = Array.from(document.querySelectorAll(contactSelector)).map((node) => node.textContent || '').join('\n');
     const brandText = document.querySelector('header img[alt], img[alt], .logo, [class*="brand"]')?.getAttribute?.('alt')
       || document.querySelector('.logo, [class*="brand"]')?.textContent
       || '';
     return {
       title,
       bodyText,
+      contactText,
+      footerText,
       allLinks,
       mailtoLinks,
       telLinks,
@@ -768,10 +895,10 @@ async function crawlSite(browser, candidate, config, failures) {
       if (!aggregate.contactPerson) {
         aggregate.contactPerson = findContactPerson(text);
       }
-      for (const value of uniqueMatches(EMAIL_REGEX, `${text}\n${signals.mailtoLinks.join('\n')}`)) {
-        aggregate.emails.add(value.replace(/\s*\[at\]\s*/i, '@').replace(/\s*\(at\)\s*/i, '@'));
+      for (const value of extractEmails(signals)) {
+        aggregate.emails.add(value);
       }
-      for (const value of uniqueMatches(PHONE_REGEX, `${text}\n${signals.telLinks.join('\n')}`)) {
+      for (const value of extractPhones(signals)) {
         aggregate.phones.add(value);
       }
       const address = extractAddressHints(text);
