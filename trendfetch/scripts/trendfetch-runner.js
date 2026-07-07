@@ -36,6 +36,7 @@ const DEFAULT_CONFIG = {
   api_key: '',
   model_name: '',
   llm_timeout_ms: 20000,
+  browser_profile_dir: './browser-profile',
   user_agent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
   viewport: { width: 1440, height: 960 },
   delay_range_ms: { min: 600, max: 1600 }
@@ -210,6 +211,163 @@ function appendCsvRow(filePath, row, headers) {
   fs.appendFileSync(filePath, `${line}\n`, 'utf8');
 }
 
+function browserLaunchOptions(config) {
+  return {
+    headless: config.headless,
+    channel: 'chrome',
+    userAgent: config.user_agent,
+    viewport: config.viewport,
+    ignoreHTTPSErrors: true,
+    locale: config.language_hint || 'en-US',
+    args: [
+      '--disable-blink-features=AutomationControlled'
+    ]
+  };
+}
+
+async function addStealthSignals(context) {
+  await context.addInitScript(() => {
+    Object.defineProperty(navigator, 'webdriver', {
+      get: () => undefined
+    });
+    Object.defineProperty(navigator, 'languages', {
+      get: () => ['en-US', 'en']
+    });
+    Object.defineProperty(navigator, 'plugins', {
+      get: () => [1, 2, 3, 4, 5]
+    });
+  });
+}
+
+async function launchSearchContext(config, profileDir) {
+  const options = browserLaunchOptions(config);
+  try {
+    const context = await chromium.launchPersistentContext(profileDir, options);
+    await addStealthSignals(context);
+    process.stdout.write(`[trendfetch] Search browser profile: ${profileDir}\n`);
+    process.stdout.write('[trendfetch] Search browser channel: chrome\n');
+    return context;
+  } catch (error) {
+    process.stdout.write(`[trendfetch] Chrome channel launch failed, falling back to bundled Chromium. ${error.message}\n`);
+    const fallbackContext = await chromium.launchPersistentContext(profileDir, {
+      ...options,
+      channel: undefined
+    });
+    await addStealthSignals(fallbackContext);
+    process.stdout.write(`[trendfetch] Search browser profile: ${profileDir}\n`);
+    process.stdout.write('[trendfetch] Search browser channel: chromium\n');
+    return fallbackContext;
+  }
+}
+
+async function launchCrawlerBrowser(config) {
+  const options = browserLaunchOptions(config);
+  try {
+    process.stdout.write('[trendfetch] Crawler browser channel: chrome\n');
+    return await chromium.launch(options);
+  } catch (error) {
+    process.stdout.write(`[trendfetch] Chrome crawler launch failed, falling back to bundled Chromium. ${error.message}\n`);
+    process.stdout.write('[trendfetch] Crawler browser channel: chromium\n');
+    return await chromium.launch({
+      ...options,
+      channel: undefined
+    });
+  }
+}
+
+async function moveMouseSoftly(page) {
+  const width = page.viewportSize()?.width || 1440;
+  const height = page.viewportSize()?.height || 960;
+  const steps = 3 + Math.floor(Math.random() * 3);
+  for (let index = 0; index < steps; index += 1) {
+    const x = 120 + Math.floor(Math.random() * Math.max(200, width - 240));
+    const y = 120 + Math.floor(Math.random() * Math.max(200, height - 240));
+    await page.mouse.move(x, y, { steps: 8 + Math.floor(Math.random() * 8) });
+    await sleep(80 + Math.floor(Math.random() * 180));
+  }
+}
+
+async function humanType(page, selector, text) {
+  const input = page.locator(selector).first();
+  await input.waitFor({ state: 'visible', timeout: 10000 });
+  await input.click({ delay: 80 + Math.floor(Math.random() * 120) });
+  await sleep(300 + Math.floor(Math.random() * 900));
+  await page.keyboard.press('Meta+A').catch(() => {});
+  await sleep(80 + Math.floor(Math.random() * 120));
+  await page.keyboard.press('Backspace').catch(() => {});
+  for (const char of text) {
+    await page.keyboard.type(char, { delay: 90 + Math.floor(Math.random() * 140) });
+    if (Math.random() < 0.16) {
+      await sleep(120 + Math.floor(Math.random() * 280));
+    }
+  }
+}
+
+async function humanScrollResults(page) {
+  const scrollSteps = 2 + Math.floor(Math.random() * 3);
+  for (let index = 0; index < scrollSteps; index += 1) {
+    const delta = 260 + Math.floor(Math.random() * 420);
+    await page.mouse.wheel(0, delta);
+    await sleep(500 + Math.floor(Math.random() * 900));
+  }
+  if (Math.random() < 0.65) {
+    await page.mouse.wheel(0, -(120 + Math.floor(Math.random() * 240)));
+    await sleep(300 + Math.floor(Math.random() * 700));
+  }
+}
+
+async function openGoogleHome(page, config) {
+  const googleHome = new URL('https://www.google.com/');
+  if (config.country_hint) {
+    googleHome.searchParams.set('gl', config.country_hint);
+  }
+  if (config.language_hint) {
+    googleHome.searchParams.set('hl', config.language_hint);
+  }
+  await page.goto(googleHome.toString(), {
+    waitUntil: 'domcontentloaded',
+    timeout: config.page_open_timeout_ms
+  });
+  await sleep(900 + Math.floor(Math.random() * 1800));
+  await acceptGoogleConsent(page);
+  await moveMouseSoftly(page);
+}
+
+async function submitSearchFromHome(page, querySpec, config) {
+  await openGoogleHome(page, config);
+  const searchSelector = 'textarea[name="q"], input[name="q"]';
+  await humanType(page, searchSelector, querySpec.translatedQuery);
+  await sleep(300 + Math.floor(Math.random() * 800));
+  await Promise.all([
+    page.waitForNavigation({
+      waitUntil: 'domcontentloaded',
+      timeout: config.page_open_timeout_ms
+    }).catch(() => null),
+    page.keyboard.press('Enter')
+  ]);
+  await sleep(1200 + Math.floor(Math.random() * 2200));
+}
+
+async function goToNextResultsPage(page, config) {
+  const nextLink = page.locator('a#pnnext, a[aria-label="Next"], a[aria-label="下一页"], a[aria-label="次へ"], a[aria-label="Suivant"], a[aria-label="Siguiente"]').first();
+  if (await nextLink.count().catch(() => 0) === 0) {
+    return false;
+  }
+  await humanScrollResults(page);
+  await moveMouseSoftly(page);
+  await nextLink.scrollIntoViewIfNeeded().catch(() => {});
+  await sleep(600 + Math.floor(Math.random() * 1500));
+  await Promise.all([
+    page.waitForNavigation({
+      waitUntil: 'domcontentloaded',
+      timeout: config.page_open_timeout_ms
+    }).catch(() => null),
+    nextLink.click({ delay: 80 + Math.floor(Math.random() * 160) })
+  ]);
+  await sleep(1200 + Math.floor(Math.random() * 2200));
+  return true;
+}
+
 function scoreText(text) {
   const haystack = normalizeWhitespace(text).toLowerCase();
   let score = 0;
@@ -322,7 +480,16 @@ async function detectGoogleBlock(page) {
 
   const title = await page.title().catch(() => '');
   const bodyText = await page.evaluate(() => document.body ? document.body.innerText : '').catch(() => '');
-  if (/unusual traffic/i.test(bodyText) || /our systems have detected/i.test(bodyText) || /captcha/i.test(bodyText)) {
+  if (
+    /unusual traffic/i.test(bodyText)
+    || /our systems have detected/i.test(bodyText)
+    || /captcha/i.test(bodyText)
+    || /enter the characters you see below/i.test(bodyText)
+    || /verify you are human/i.test(bodyText)
+    || /not a robot/i.test(bodyText)
+    || /安全验证/u.test(bodyText)
+    || /验证码/u.test(bodyText)
+  ) {
     return {
       blocked: true,
       reason: 'google-unusual-traffic-page',
@@ -334,23 +501,20 @@ async function detectGoogleBlock(page) {
   return { blocked: false };
 }
 
+async function pauseForGoogleReauth(searchPage, config, logs, querySpec, pageIndex, blockState) {
+  logs.manualAuthRequested = true;
+  process.stdout.write('\n[trendfetch] Google verification was triggered during search.\n');
+  process.stdout.write(`[trendfetch] Query: ${querySpec.translatedQuery} | Page: ${pageIndex + 1}\n`);
+  process.stdout.write(`[trendfetch] Block reason: ${blockState.reason}\n`);
+  process.stdout.write('[trendfetch] Solve the verification in the opened browser window, then continue.\n');
+  await waitForEnter('[trendfetch] Press Enter here after Google is ready to continue searching: ');
+}
+
 async function performManualGoogleAuth(searchPage, config, logs) {
   if (!config.manual_google_auth) {
     return;
   }
-  const googleHome = new URL('https://www.google.com/');
-  if (config.country_hint) {
-    googleHome.searchParams.set('gl', config.country_hint);
-  }
-  if (config.language_hint) {
-    googleHome.searchParams.set('hl', config.language_hint);
-  }
-
-  await searchPage.goto(googleHome.toString(), {
-    waitUntil: 'domcontentloaded',
-    timeout: config.page_open_timeout_ms
-  });
-  await sleep(1000);
+  await openGoogleHome(searchPage, config);
   await captureGoogleDebug(
     searchPage,
     config.__resolved_output_dir,
@@ -372,27 +536,31 @@ async function hasNextGooglePage(page) {
 async function runGoogleSearch(page, querySpec, config, logs) {
   const collected = [];
   let pageIndex = 0;
-  let start = 0;
 
   while (pageIndex < config.max_pages_per_query && collected.length < config.top_results_limit_per_query) {
-    const searchUrl = new URL('https://www.google.com/search');
-    searchUrl.searchParams.set('q', querySpec.translatedQuery);
-    searchUrl.searchParams.set('hl', querySpec.language || config.language_hint);
-    searchUrl.searchParams.set('num', '10');
-    searchUrl.searchParams.set('start', String(start));
-    if (config.country_hint) {
-      searchUrl.searchParams.set('gl', config.country_hint);
-    }
+    while (true) {
+      if (pageIndex === 0) {
+        await submitSearchFromHome(page, querySpec, config);
+      } else {
+        const hasNext = await goToNextResultsPage(page, config);
+        if (!hasNext) {
+          return collected;
+        }
+      }
 
-    await page.goto(searchUrl.toString(), {
-      waitUntil: 'domcontentloaded',
-      timeout: config.page_open_timeout_ms
-    });
-    await sleep(randomDelay(config.delay_range_ms));
-    await acceptGoogleConsent(page);
-    const blockState = await detectGoogleBlock(page);
-    if (blockState.blocked) {
+      await sleep(randomDelay(config.delay_range_ms) + 900);
+      const blockState = await detectGoogleBlock(page);
+      if (!blockState.blocked) {
+        break;
+      }
+
       await captureGoogleDebug(page, config.__resolved_output_dir, querySpec, pageIndex, []);
+      if (config.manual_google_auth) {
+        await pauseForGoogleReauth(page, config, logs, querySpec, pageIndex, blockState);
+        await sleep(1000);
+        continue;
+      }
+
       const error = new Error(blockState.reason);
       error.code = 'GOOGLE_BLOCKED';
       error.details = blockState;
@@ -420,11 +588,6 @@ async function runGoogleSearch(page, querySpec, config, logs) {
 
     logs.googlePagesVisited += 1;
     pageIndex += 1;
-    start += 10;
-
-    if (!(await hasNextGooglePage(page))) {
-      break;
-    }
   }
 
   return collected;
@@ -736,14 +899,12 @@ async function main() {
   ensureDir(outputDir);
   const resultsCsvPath = path.join(outputDir, 'results.csv');
   initializeCsv(resultsCsvPath, RESULT_HEADERS);
+  const browserProfileDir = path.resolve(path.dirname(configPath), config.browser_profile_dir || DEFAULT_CONFIG.browser_profile_dir);
+  ensureDir(browserProfileDir);
 
-  const browser = await chromium.launch({ headless: config.headless });
-  const searchContext = await browser.newContext({
-    userAgent: config.user_agent,
-    viewport: config.viewport,
-    ignoreHTTPSErrors: true
-  });
-  const searchPage = await searchContext.newPage();
+  const searchContext = await launchSearchContext(config, browserProfileDir);
+  const searchPage = searchContext.pages()[0] || await searchContext.newPage();
+  const crawlerBrowser = await launchCrawlerBrowser(config);
 
   const logs = {
     startedAt: new Date().toISOString(),
@@ -805,7 +966,7 @@ async function main() {
       }
 
       const candidate = { ...result, url: normalized };
-      const crawlOutcome = await crawlSite(browser, candidate, config, failures);
+      const crawlOutcome = await crawlSite(crawlerBrowser, candidate, config, failures);
       if (!crawlOutcome) {
         continue;
       }
@@ -848,7 +1009,7 @@ async function main() {
   }
 
   await searchContext.close();
-  await browser.close();
+  await crawlerBrowser.close();
 
   const mergedRows = mergeRowsByDomain(successfulRows);
   writeCsv(resultsCsvPath, mergedRows, RESULT_HEADERS);

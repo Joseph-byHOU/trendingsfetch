@@ -16,6 +16,7 @@ trendfetch/scripts/google-debug/
 # Desktop app runtime state and secrets
 trendfetch-desktop/data/app-config.json
 trendfetch-desktop/data/runtime-config.json
+trendfetch-desktop/data/browser-profile/
 
 # Logs
 *.log
