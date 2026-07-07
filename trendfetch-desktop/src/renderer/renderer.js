@@ -10,6 +10,7 @@ const state = {
   config: null,
   resultRows: [],
   resultHeaders: [],
+  outputRefreshTimer: null,
   runState: {
     running: false,
     manualAuthPending: false,
@@ -84,6 +85,8 @@ function setRunState(nextState) {
     pill.textContent = 'Idle';
     text.textContent = 'Ready to configure a new collection run.';
   }
+
+  ensureOutputRefreshLoop();
 }
 
 function getFormValue(id) {
@@ -279,7 +282,7 @@ function renderJsonView(id, value) {
 }
 
 async function refreshOutputs() {
-  const outputDir = getFormValue('output_dir');
+  const outputDir = state.runState.outputDir || getFormValue('output_dir');
   const result = await window.trendfetchApi.loadResults(outputDir);
   if (!result.ok) {
     return;
@@ -299,6 +302,21 @@ async function refreshOutputs() {
   renderJsonView('#failures-view', result.failures || []);
   renderJsonView('#filtered-view', result.filtered || []);
   renderJsonView('#queries-view', result.expansions || []);
+}
+
+function ensureOutputRefreshLoop() {
+  const shouldPoll = Boolean(state.runState.running);
+  if (shouldPoll && !state.outputRefreshTimer) {
+    state.outputRefreshTimer = window.setInterval(() => {
+      refreshOutputs().catch(() => {});
+    }, 2500);
+    return;
+  }
+
+  if (!shouldPoll && state.outputRefreshTimer) {
+    window.clearInterval(state.outputRefreshTimer);
+    state.outputRefreshTimer = null;
+  }
 }
 
 function bindTabs() {
@@ -330,6 +348,10 @@ function bindEvents() {
 
   $('#btn-start').addEventListener('click', async () => {
     appendLog('[trendfetch-app] Starting run...\n');
+    state.resultRows = [];
+    state.resultHeaders = [];
+    syncSortKeyOptions();
+    renderResultsTable();
     const response = await window.trendfetchApi.startRun(collectConfig());
     if (!response.ok) {
       appendLog(`[trendfetch-app] ${response.error}\n`);

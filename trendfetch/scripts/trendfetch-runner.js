@@ -89,6 +89,23 @@ const CONTACT_PATHS = [
 const EMAIL_REGEX = /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi;
 const PHONE_REGEX = /(?:\+?\d[\d\s().-]{6,}\d)/g;
 const PERSON_REGEX = /\b(?:contact|sales manager|account manager|founder|ceo|mr\.|ms\.)[:\s-]*([A-Z][A-Za-z]+(?:\s+[A-Z][A-Za-z]+){0,2})/i;
+const RESULT_HEADERS = [
+  'store_name',
+  'website_url',
+  'contact_person',
+  'country',
+  'city',
+  'phone',
+  'email',
+  'query_original',
+  'query_translated',
+  'query_language',
+  'source_query',
+  'source_google_page',
+  'source_contact_page',
+  'confidence_score',
+  'notes'
+];
 
 function parseArgs(argv) {
   const args = { config: null };
@@ -182,6 +199,15 @@ function writeCsv(filePath, rows, headers) {
     lines.push(headers.map((header) => csvEscape(row[header])).join(','));
   }
   fs.writeFileSync(filePath, `${lines.join('\n')}\n`, 'utf8');
+}
+
+function initializeCsv(filePath, headers) {
+  fs.writeFileSync(filePath, `${headers.join(',')}\n`, 'utf8');
+}
+
+function appendCsvRow(filePath, row, headers) {
+  const line = headers.map((header) => csvEscape(row[header])).join(',');
+  fs.appendFileSync(filePath, `${line}\n`, 'utf8');
 }
 
 function scoreText(text) {
@@ -708,6 +734,8 @@ async function main() {
 
   const outputDir = resolveOutputDir(configPath, config.output_dir);
   ensureDir(outputDir);
+  const resultsCsvPath = path.join(outputDir, 'results.csv');
+  initializeCsv(resultsCsvPath, RESULT_HEADERS);
 
   const browser = await chromium.launch({ headless: config.headless });
   const searchContext = await browser.newContext({
@@ -802,6 +830,7 @@ async function main() {
           ...crawlOutcome,
           row: llmDecision.row
         });
+        appendCsvRow(resultsCsvPath, llmDecision.row, RESULT_HEADERS);
       } catch (error) {
         failures.push({
           website_url: candidate.url,
@@ -813,6 +842,7 @@ async function main() {
           last_error_at: new Date().toISOString()
         });
         successfulRows.push(crawlOutcome);
+        appendCsvRow(resultsCsvPath, crawlOutcome.row, RESULT_HEADERS);
       }
     }
   }
@@ -821,23 +851,7 @@ async function main() {
   await browser.close();
 
   const mergedRows = mergeRowsByDomain(successfulRows);
-  writeCsv(path.join(outputDir, 'results.csv'), mergedRows, [
-    'store_name',
-    'website_url',
-    'contact_person',
-    'country',
-    'city',
-    'phone',
-    'email',
-    'query_original',
-    'query_translated',
-    'query_language',
-    'source_query',
-    'source_google_page',
-    'source_contact_page',
-    'confidence_score',
-    'notes'
-  ]);
+  writeCsv(resultsCsvPath, mergedRows, RESULT_HEADERS);
 
   writeJson(path.join(outputDir, 'failures.json'), failures);
   writeJson(path.join(outputDir, 'filtered.json'), filtered);
